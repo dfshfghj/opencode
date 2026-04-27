@@ -6117,6 +6117,11 @@ export type FindTextData = {
     directory?: string
     workspace?: string
     pattern: string
+    include?: string
+    exclude?: string
+    case?: "true" | "false"
+    word?: "true" | "false"
+    regex?: "true" | "false"
   }
   url: "/find"
 }
