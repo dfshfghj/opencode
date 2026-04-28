@@ -401,7 +401,9 @@ export namespace Ripgrep {
     case?: boolean
     word?: boolean
     regex?: boolean
+    signal?: AbortSignal
   }): Promise<MatchData[]> {
+    input.signal?.throwIfAborted()
     const args = [`${await filepath()}`, "--json", "--hidden", "--glob=!.git/*"]
     if (input.follow) args.push("--follow")
     if (!input.case) args.push("--ignore-case")
@@ -420,6 +422,7 @@ export namespace Ripgrep {
     const result = await Process.text(args, {
       cwd: input.cwd,
       nothrow: true,
+      abort: input.signal,
     })
     if (result.code === 1) {
       return []
