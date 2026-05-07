@@ -368,16 +368,6 @@ export type EventMcpBrowserOpenFailed = {
   }
 }
 
-export type EventCommandExecuted = {
-  type: "command.executed"
-  properties: {
-    name: string
-    sessionID: string
-    arguments: string
-    messageID: string
-  }
-}
-
 export type EventSessionPreferenceUpdated = {
   type: "session.preference.updated"
   properties: {
@@ -392,6 +382,16 @@ export type EventSessionPreferenceUpdated = {
       variant?: string | null
       autoAccept?: boolean
     }
+  }
+}
+
+export type EventCommandExecuted = {
+  type: "command.executed"
+  properties: {
+    name: string
+    sessionID: string
+    arguments: string
+    messageID: string
   }
 }
 
@@ -485,6 +485,15 @@ export type EventSessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | ApiError
+  }
+}
+
+export type EventSessionBackgroundTaskCompleted = {
+  type: "session.background_task.completed"
+  properties: {
+    parentSessionID: string
+    taskID: string
+    status: string
   }
 }
 
@@ -694,6 +703,18 @@ export type SubtaskPart = {
     modelID: string
   }
   command?: string
+  category?: string
+  discipline?: {
+    mode?: "serial" | "concurrent" | "background"
+    delegation_depth?: number
+    permission_override?: {
+      [key: string]: Array<string>
+    }
+    max_steps?: number
+    timeout_seconds?: number
+    file_scope?: Array<string>
+    return_format?: "text" | "structured" | "raw"
+  }
 }
 
 export type ReasoningPart = {
@@ -984,6 +1005,9 @@ export type Session = {
     archived?: number
   }
   permission?: PermissionRuleset
+  delegationDepth?: number
+  maxSteps?: number
+  fileScope?: Array<string>
   revert?: {
     messageID: string
     partID?: string
@@ -1065,10 +1089,11 @@ export type Event =
   | EventTuiSessionSelect
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
-  | EventCommandExecuted
   | EventSessionPreferenceUpdated
+  | EventCommandExecuted
   | EventSessionDiff
   | EventSessionError
+  | EventSessionBackgroundTaskCompleted
   | EventVcsBranchUpdated
   | EventWorkspaceReady
   | EventWorkspaceFailed
@@ -1172,6 +1197,9 @@ export type SyncEventSessionUpdated = {
         archived: number | null
       }
       permission: PermissionRuleset | null
+      delegationDepth: number | null
+      maxSteps: number | null
+      fileScope: Array<string> | null
       revert: {
         messageID: string
         partID?: string
@@ -1291,6 +1319,10 @@ export type AgentConfig = {
   top_p?: number
   prompt?: string
   /**
+   * Append to system prompt instead of replacing it. Supports file:// URIs.
+   */
+  prompt_append?: string
+  /**
    * @deprecated Use 'permission' field instead
    */
   tools?: {
@@ -1322,6 +1354,97 @@ export type AgentConfig = {
    */
   maxSteps?: number
   permission?: PermissionConfig
+  /**
+   * Fallback model chain for API errors. Mix strings and objects with per-model settings.
+   */
+  fallback_models?: Array<
+    | string
+    | {
+        model: string
+        variant?: string
+        temperature?: number
+        top_p?: number
+        thinking?: {
+          type: string
+          budgetTokens?: number
+        }
+        reasoningEffort?: string
+        maxTokens?: number
+      }
+  >
+  /**
+   * MCP servers to activate when this agent mode is active. Key=MCP name, value=enabled.
+   */
+  mcp?: {
+    [key: string]: boolean
+  }
+  /**
+   * Description shown for the xxx_enter mode-switch tool.
+   */
+  enter_description?: string
+  /**
+   * Description shown for the xxx_exit mode-switch tool.
+   */
+  exit_description?: string
+  /**
+   * Destinations offered when exiting this agent mode.
+   */
+  exit_options?: Array<{
+    label: string
+    agent: string
+    description: string
+  }>
+  /**
+   * Directory where this agent mode writes its output files (relative to project root).
+   */
+  output_dir?: string
+  /**
+   * Name of native agent to inherit permission, model, temperature, and other defaults from.
+   */
+  base_agent?: string
+  /**
+   * Whitelist of skill names to auto-inject into this agent's system prompt with full content.
+   */
+  skill_refs?: Array<string>
+  /**
+   * Artifact names this agent expects to receive.
+   */
+  inputs?: Array<string>
+  /**
+   * Artifact names this agent is responsible for producing.
+   */
+  outputs?: Array<string>
+  /**
+   * Structured output contract: fields that must appear in the agent's final response.
+   */
+  output_contract?: {
+    required_fields?: Array<string>
+  }
+  /**
+   * Controls what context is passed when this agent is called as subagent.
+   */
+  context_policy?: {
+    pass_full_history?: boolean
+    pass_artifacts?: boolean
+    pass_user_constraints?: boolean
+    pass_relevant_evidence?: boolean
+  }
+  /**
+   * Functional domain grouping (e.g., coordination, theory_strategy, data_and_statistics).
+   */
+  domain?: string
+  /**
+   * Whether this agent is an optional domain-specific extension.
+   */
+  optional_extension?: boolean
+  /**
+   * Declares what this agent owns and must not absorb from adjacent roles.
+   */
+  responsibility_boundary?: string
+  /**
+   * Design溯源 labels documenting which archetypes/policies shaped this agent.
+   */
+  role_design_basis?: Array<string>
   [key: string]:
     | unknown
     | string
@@ -1346,6 +1469,42 @@ export type AgentConfig = {
     | "info"
     | number
     | PermissionConfig
+    | Array<
+        | string
+        | {
+            model: string
+            variant?: string
+            temperature?: number
+            top_p?: number
+            thinking?: {
+              type: string
+              budgetTokens?: number
+            }
+            reasoningEffort?: string
+            maxTokens?: number
+          }
+      >
+    | {
+        [key: string]: boolean
+      }
+    | Array<{
+        label: string
+        agent: string
+        description: string
+      }>
+    | Array<string>
+    | Array<string>
+    | Array<string>
+    | {
+        required_fields?: Array<string>
+      }
+    | {
+        pass_full_history?: boolean
+        pass_artifacts?: boolean
+        pass_user_constraints?: boolean
+        pass_relevant_evidence?: boolean
+      }
+    | Array<string>
     | undefined
 }
 
@@ -1634,6 +1793,51 @@ export type Config = {
     [key: string]: AgentConfig | undefined
   }
   /**
+   * Global defaults applied to all agents before per-agent overrides.
+   */
+  agent_defaults?: {
+    permission?: PermissionConfig
+    /**
+     * Default context policy applied to all agents before per-agent overrides.
+     */
+    context_policy?: {
+      pass_full_history?: boolean
+      pass_artifacts?: boolean
+      pass_user_constraints?: boolean
+      pass_relevant_evidence?: boolean
+    }
+    /**
+     * Default output contract applied to all agents before per-agent overrides.
+     */
+    output_contract?: {
+      required_fields?: Array<string>
+    }
+  }
+  /**
+   * Semantic categories for task model routing. Key=category name, value=model config.
+   */
+  category?: {
+    [key: string]: {
+      model?: string
+      variant?: string
+      temperature?: number
+      top_p?: number
+      /**
+       * Content appended to system prompt when this category is selected. Supports file:// URIs.
+       */
+      prompt_append?: string
+      thinking?: {
+        type: string
+        budgetTokens?: number
+      }
+      reasoningEffort?: string
+      /**
+       * Human-readable description shown in task prompt.
+       */
+      description?: string
+    }
+  }
+  /**
    * Custom provider configurations and model overrides
    */
   provider?: {
@@ -1713,6 +1917,12 @@ export type Config = {
      * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
      */
     reserved?: number
+  }
+  concurrency?: {
+    /**
+     * Maximum number of concurrent background subagent tasks (default: 5)
+     */
+    maxConcurrent?: number
   }
   memory?: {
     /**
@@ -1976,6 +2186,9 @@ export type GlobalSession = {
     archived?: number
   }
   permission?: PermissionRuleset
+  delegationDepth?: number
+  maxSteps?: number
+  fileScope?: Array<string>
   revert?: {
     messageID: string
     partID?: string
@@ -2112,6 +2325,18 @@ export type SubtaskPartInput = {
     modelID: string
   }
   command?: string
+  category?: string
+  discipline?: {
+    mode?: "serial" | "concurrent" | "background"
+    delegation_depth?: number
+    permission_override?: {
+      [key: string]: Array<string>
+    }
+    max_steps?: number
+    timeout_seconds?: number
+    file_scope?: Array<string>
+    return_format?: "text" | "structured" | "raw"
+  }
 }
 
 export type ProviderAuthMethod = {
@@ -2309,10 +2534,54 @@ export type Agent = {
   }
   variant?: string
   prompt?: string
+  promptAppend?: string
   options: {
     [key: string]: unknown
   }
   steps?: number
+  fallbackModels?: Array<
+    | string
+    | {
+        model: string
+        variant?: string
+        temperature?: number
+        top_p?: number
+        thinking?: {
+          type: string
+          budgetTokens?: number
+        }
+        reasoningEffort?: string
+        maxTokens?: number
+      }
+  >
+  mcp?: {
+    [key: string]: boolean
+  }
+  enterDescription?: string
+  exitDescription?: string
+  exitOptions?: Array<{
+    label: string
+    agent: string
+    description: string
+  }>
+  outputDir?: string
+  baseAgent?: string
+  skillRefs?: Array<string>
+  inputs?: Array<string>
+  outputs?: Array<string>
+  outputContract?: {
+    requiredFields?: Array<string>
+  }
+  contextPolicy?: {
+    passFullHistory?: boolean
+    passArtifacts?: boolean
+    passUserConstraints?: boolean
+    passRelevantEvidence?: boolean
+  }
+  domain?: string
+  optionalExtension?: boolean
+  responsibilityBoundary?: string
+  roleDesignBasis?: Array<string>
 }
 
 export type LspStatus = {
@@ -3661,6 +3930,18 @@ export type MemoryGetResponses = {
       inferred_entries?: Array<string>
       invalid_entries?: number
     }
+    inbox: {
+      store: "user" | "memory"
+      enabled: boolean
+      file: string
+      limit: number
+      used: number
+      usage: number
+      entries: Array<string>
+      explicit_entries?: Array<string>
+      inferred_entries?: Array<string>
+      invalid_entries?: number
+    }
     memory: {
       store: "user" | "memory"
       enabled: boolean
@@ -4298,6 +4579,9 @@ export type SessionCreateData = {
     parentID?: string
     title?: string
     permission?: PermissionRuleset
+    delegationDepth?: number
+    maxSteps?: number
+    fileScope?: Array<string>
     workspaceID?: string
   }
   path?: never
@@ -4941,6 +5225,7 @@ export type SessionPromptData = {
     }
     agent?: string
     noReply?: boolean
+    maxSteps?: number
     /**
      * @deprecated tools and permissions have been merged, you can set permissions on the session itself now
      */
@@ -5147,6 +5432,7 @@ export type SessionPromptAsyncData = {
     }
     agent?: string
     noReply?: boolean
+    maxSteps?: number
     /**
      * @deprecated tools and permissions have been merged, you can set permissions on the session itself now
      */
@@ -6150,6 +6436,54 @@ export type FindTextResponses = {
 }
 
 export type FindTextResponse = FindTextResponses[keyof FindTextResponses]
+
+export type FindTextStreamData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    pattern: string
+    include?: string
+    exclude?: string
+    case?: "true" | "false"
+    word?: "true" | "false"
+    regex?: "true" | "false"
+  }
+  url: "/find/stream"
+}
+
+export type FindTextStreamResponses = {
+  /**
+   * SSE matches
+   */
+  200:
+    | Array<{
+        path: {
+          text: string
+        }
+        lines: {
+          text: string
+        }
+        line_number: number
+        absolute_offset: number
+        submatches: Array<{
+          match: {
+            text: string
+          }
+          start: number
+          end: number
+        }>
+      }>
+    | {
+        count: number
+      }
+    | {
+        message: string
+      }
+}
+
+export type FindTextStreamResponse = FindTextStreamResponses[keyof FindTextStreamResponses]
 
 export type FindFilesData = {
   body?: never
@@ -7568,6 +7902,85 @@ export type KnowledgeModelsListResponses = {
 }
 
 export type KnowledgeModelsListResponse = KnowledgeModelsListResponses[keyof KnowledgeModelsListResponses]
+
+export type KnowledgeDiscoverData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/knowledge/discover"
+}
+
+export type KnowledgeDiscoverResponses = {
+  /**
+   * 发现的知识库列表
+   */
+  200: {
+    found: Array<{
+      path: string
+      config: {
+        name: string
+        embeddingProvider: string
+        embeddingModel: string
+        embeddingDimensions?: number
+        apiKey?: string
+        baseURL?: string
+        chunkSize?: number
+        chunkOverlap?: number
+      }
+    }>
+  }
+}
+
+export type KnowledgeDiscoverResponse = KnowledgeDiscoverResponses[keyof KnowledgeDiscoverResponses]
+
+export type KnowledgeStateGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/knowledge/state"
+}
+
+export type KnowledgeStateGetResponses = {
+  /**
+   * 知识库状态
+   */
+  200: {
+    knowledgeBases: Array<unknown>
+    activeIds: Array<string>
+    lastConfig?: unknown
+  }
+}
+
+export type KnowledgeStateGetResponse = KnowledgeStateGetResponses[keyof KnowledgeStateGetResponses]
+
+export type KnowledgeStatePostData = {
+  body?: {
+    data: unknown
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/knowledge/state"
+}
+
+export type KnowledgeStatePostResponses = {
+  /**
+   * 保存成功
+   */
+  200: {
+    ok: boolean
+  }
+}
+
+export type KnowledgeStatePostResponse = KnowledgeStatePostResponses[keyof KnowledgeStatePostResponses]
 
 export type KnowledgeCreateData = {
   body?: {
