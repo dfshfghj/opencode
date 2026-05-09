@@ -370,6 +370,7 @@ export const FileRoutes = lazy(() =>
           word: body.word,
           regex: body.regex,
           limit: body.limit,
+          signal: c.req.raw.signal,
         })
         return c.json(result)
       },
