@@ -112,7 +112,6 @@ import type {
   FindFilesResponses,
   FindSymbolsResponses,
   FindTextResponses,
-  FindTextStreamResponses,
   FormatterStatusResponses,
   GlobalConfigGetResponses,
   GlobalConfigSkillsUpdateErrors,
@@ -5272,17 +5271,14 @@ export class Find extends HeyApiClient {
    * Find text
    *
    * Search for text patterns across files in the project using ripgrep.
+   *
+   * @deprecated
    */
   public text<ThrowOnError extends boolean = false>(
     parameters: {
       directory?: string
       workspace?: string
       pattern: string
-      include?: string
-      exclude?: string
-      case?: "true" | "false"
-      word?: "true" | "false"
-      regex?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -5294,59 +5290,12 @@ export class Find extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "query", key: "pattern" },
-            { in: "query", key: "include" },
-            { in: "query", key: "exclude" },
-            { in: "query", key: "case" },
-            { in: "query", key: "word" },
-            { in: "query", key: "regex" },
           ],
         },
       ],
     )
     return (options?.client ?? this.client).get<FindTextResponses, unknown, ThrowOnError>({
       url: "/find",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Find text stream
-   *
-   * Stream text matches across files in the project using ripgrep.
-   */
-  public textStream<ThrowOnError extends boolean = false>(
-    parameters: {
-      directory?: string
-      workspace?: string
-      pattern: string
-      include?: string
-      exclude?: string
-      case?: "true" | "false"
-      word?: "true" | "false"
-      regex?: "true" | "false"
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-            { in: "query", key: "pattern" },
-            { in: "query", key: "include" },
-            { in: "query", key: "exclude" },
-            { in: "query", key: "case" },
-            { in: "query", key: "word" },
-            { in: "query", key: "regex" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).sse.get<FindTextStreamResponses, unknown, ThrowOnError>({
-      url: "/find/stream",
       ...options,
       ...params,
     })
