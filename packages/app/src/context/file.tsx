@@ -301,6 +301,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
 
     const viewCache = createFileViewCache()
     const view = createMemo(() => viewCache.load(scope(), params.id))
+    const [reveal, setReveal] = createStore<Record<string, { line: number; token: number }>>({})
 
     const ensure = (file: string) => {
       if (!file) return
@@ -454,6 +455,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
     const pdfPage = (input: string) => withPath(input, (file) => view().pdfPage(file))
     const pdfLocation = (input: string) => withPath(input, (file) => view().pdfLocation(file))
     const selectedLines = (input: string) => withPath(input, (file) => view().selectedLines(file))
+    const revealLine = (input: string) => withPath(input, (file) => reveal[file])
     const wordWrap = (input: string) => withPath(input, (file) => view().wordWrap(file))
     const isEditing = (input: string) => withPath(input, (file) => view().isEditing(file))
     const draft = (input: string) => withPath(input, (file) => view().draft(file))
@@ -465,6 +467,24 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       withPath(input, (file) => view().setPdfLocation(file, location))
     const setSelectedLines = (input: string, range: SelectedLineRange | null) =>
       withPath(input, (file) => view().setSelectedLines(file, range))
+    const requestRevealLine = (input: string, line: number) =>
+      withPath(input, (file) => {
+        setReveal(file, (value) => ({
+          line,
+          token: (value?.token ?? 0) + 1,
+        }))
+      })
+    const clearRevealLine = (input: string, token?: number) =>
+      withPath(input, (file) => {
+        const current = reveal[file]
+        if (!current) return
+        if (token !== undefined && current.token !== token) return
+        setReveal(
+          produce((draft: Record<string, { line: number; token: number }>) => {
+            delete draft[file]
+          }),
+        )
+      })
     const setWordWrap = (input: string, wrap: boolean) => withPath(input, (file) => view().setWordWrap(file, wrap))
     const setIsEditing = (input: string, editing: boolean) =>
       withPath(input, (file) => view().setIsEditing(file, editing))
@@ -512,7 +532,10 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       setPdfPage,
       setPdfLocation,
       selectedLines,
+      revealLine,
       setSelectedLines,
+      requestRevealLine,
+      clearRevealLine,
       wordWrap,
       setWordWrap,
       isEditing,
