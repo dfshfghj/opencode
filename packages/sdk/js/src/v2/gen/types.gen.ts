@@ -2423,6 +2423,46 @@ export type GlobalWebUpdateCurrentResponses = {
 
 export type GlobalWebUpdateCurrentResponse = GlobalWebUpdateCurrentResponses[keyof GlobalWebUpdateCurrentResponses]
 
+export type GlobalActiveDirectoryGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/active-directory"
+}
+
+export type GlobalActiveDirectoryGetResponses = {
+  /**
+   * Current active directory
+   */
+  200: {
+    directory?: string
+  }
+}
+
+export type GlobalActiveDirectoryGetResponse =
+  GlobalActiveDirectoryGetResponses[keyof GlobalActiveDirectoryGetResponses]
+
+export type GlobalActiveDirectorySetData = {
+  body?: {
+    directory?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/active-directory"
+}
+
+export type GlobalActiveDirectorySetResponses = {
+  /**
+   * Updated active directory
+   */
+  200: {
+    directory?: string
+  }
+}
+
+export type GlobalActiveDirectorySetResponse =
+  GlobalActiveDirectorySetResponses[keyof GlobalActiveDirectorySetResponses]
+
 export type GlobalPingData = {
   body?: {
     id: string
@@ -8076,6 +8116,29 @@ export type CronRunsGetResponses = {
 }
 
 export type CronRunsGetResponse = CronRunsGetResponses[keyof CronRunsGetResponses]
+
+export type PostVoiceTranscribeData = {
+  body?: {
+    providerID: string
+    modelID: string
+    audioBase64: string
+    audioFormat: string
+    context?: Array<{
+      role: string
+      content: string
+    }>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/voice/transcribe"
+}
+
+export type PostVoiceTranscribeResponses = {
+  200: unknown
+}
 
 export type WechatStartData = {
   body?: never

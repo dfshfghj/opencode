@@ -104,6 +104,8 @@ import type {
   FindSymbolsResponses,
   FindTextResponses,
   FormatterStatusResponses,
+  GlobalActiveDirectoryGetResponses,
+  GlobalActiveDirectorySetResponses,
   GlobalConfigGetResponses,
   GlobalConfigUpdateErrors,
   GlobalConfigUpdateResponses,
@@ -181,6 +183,7 @@ import type {
   PermissionRespondErrors,
   PermissionRespondResponses,
   PermissionRuleset,
+  PostVoiceTranscribeResponses,
   ProjectCurrentResponses,
   ProjectDirectoriesResponses,
   ProjectInitGitResponses,
@@ -596,6 +599,44 @@ export class WebUpdate extends HeyApiClient {
   }
 }
 
+export class ActiveDirectory extends HeyApiClient {
+  /**
+   * Get active directory
+   *
+   * Get the browser's current active directory.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalActiveDirectoryGetResponses, unknown, ThrowOnError>({
+      url: "/global/active-directory",
+      ...options,
+    })
+  }
+
+  /**
+   * Set active directory
+   *
+   * Set the browser's active directory so background services can scope work to the current workspace.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "directory" }] }])
+    return (options?.client ?? this.client).post<GlobalActiveDirectorySetResponses, unknown, ThrowOnError>({
+      url: "/global/active-directory",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class SyncEvent extends HeyApiClient {
   /**
    * Subscribe to global sync events
@@ -752,6 +793,11 @@ export class Global extends HeyApiClient {
   private _webUpdate?: WebUpdate
   get webUpdate(): WebUpdate {
     return (this._webUpdate ??= new WebUpdate({ client: this.client }))
+  }
+
+  private _activeDirectory?: ActiveDirectory
+  get activeDirectory(): ActiveDirectory {
+    return (this._activeDirectory ??= new ActiveDirectory({ client: this.client }))
   }
 
   private _syncEvent?: SyncEvent
@@ -8062,6 +8108,49 @@ export class OpencodeClient extends HeyApiClient {
   constructor(args?: { client?: Client; key?: string }) {
     super(args)
     OpencodeClient.__registry.set(this, args?.key)
+  }
+
+  public postVoiceTranscribe<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      providerID?: string
+      modelID?: string
+      audioBase64?: string
+      audioFormat?: string
+      context?: Array<{
+        role: string
+        content: string
+      }>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "providerID" },
+            { in: "body", key: "modelID" },
+            { in: "body", key: "audioBase64" },
+            { in: "body", key: "audioFormat" },
+            { in: "body", key: "context" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PostVoiceTranscribeResponses, unknown, ThrowOnError>({
+      url: "/voice/transcribe",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 
   private _global?: Global
