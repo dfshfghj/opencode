@@ -2444,6 +2444,7 @@ export type GlobalActiveDirectoryGetResponse =
 
 export type GlobalActiveDirectorySetData = {
   body?: {
+    id: string
     directory?: string
   }
   path?: never

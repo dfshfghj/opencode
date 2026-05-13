@@ -52,6 +52,11 @@ const PingInput = z.object({
   alive: z.boolean().optional(),
 })
 
+const ActiveDirectoryInput = z.object({
+  id: z.string().min(1),
+  directory: z.string().optional(),
+})
+
 const ActiveDirectoryValue = z.object({
   directory: z.string().optional(),
 })
@@ -278,7 +283,7 @@ export const GlobalRoutes = lazy(() =>
       "/active-directory",
       describeRoute({
         summary: "Set active directory",
-        description: "Set the browser's active directory so background services can scope work to the current workspace.",
+        description: "Set or clear a browser lease's active directory so background services can scope work to the current workspace.",
         operationId: "global.activeDirectory.set",
         responses: {
           200: {
@@ -291,11 +296,11 @@ export const GlobalRoutes = lazy(() =>
           },
         },
       }),
-      validator("json", ActiveDirectoryValue),
+      validator("json", ActiveDirectoryInput),
       async (c) => {
         const body = c.req.valid("json")
         return c.json({
-          directory: ActiveDirectory.set(body.directory),
+          directory: ActiveDirectory.set(body.id, body.directory),
         })
       },
     )
@@ -343,11 +348,20 @@ export const GlobalRoutes = lazy(() =>
       validator("json", PingInput),
       async (c) => {
         const body = c.req.valid("json")
+        log.info("ping lease", {
+          id: body.id,
+          alive: body.alive !== false,
+          directory: ActiveDirectory.directory(body.id),
+          active_directory: ActiveDirectory.get(),
+          active_directories: ActiveDirectory.list(),
+        })
         if (body.alive === false) {
           Lease.drop(body.id)
+          ActiveDirectory.drop(body.id)
           return c.json({ ok: true as const })
         }
         Lease.touch(body.id)
+        ActiveDirectory.touch(body.id)
         return c.json({ ok: true as const })
       },
     )
