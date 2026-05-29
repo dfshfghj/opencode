@@ -4,11 +4,26 @@ import { createStore } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { checkServerHealth, useCheckServerHealth } from "@/utils/server-health"
 import { usePlatform } from "@/context/platform"
+import { addGlobalServerMethods, createSdkForServer } from "@/utils/server"
 
 type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
+type SavedServer = {
+  key: string
+  url: string
+  displayName?: string
+  username?: string
+  password?: string
+}
+type SavedServerState = {
+  list: SavedServer[]
+  default?: string
+  projects: Record<string, StoredProject[]>
+  lastProject: Record<string, string>
+}
 const HEALTH_POLL_INTERVAL_MS = 10_000
 const HEALTH_CHECK_TIMEOUT_MS = 8_000
+const SERVER_SYNC_RETRY_MS = 250
 
 let _pingPaused = false
 export const pingPaused = () => _pingPaused
@@ -31,6 +46,11 @@ function projectsKey(key: ServerConnection.Key) {
   if (key === "sidecar") return "local"
   if (isLocalHost(key)) return "local"
   return key
+}
+
+function scopeKey(key: ServerConnection.Key, sync: boolean) {
+  if (sync) return key
+  return projectsKey(key)
 }
 
 function isLocalHost(url: string) {
@@ -113,6 +133,117 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     )
 
     const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
+    const syncEnabled = platform.platform === "web"
+    const syncServer = createMemo(() => props.servers?.find((value) => value.type === "http")?.http)
+    const auth = (http: ServerConnection.HttpBase) =>
+      !http.password ? undefined : { Authorization: `Basic ${btoa(`${http.username ?? "opencode"}:${http.password}`)}` }
+    const sdk = () => {
+      const server = syncServer()
+      if (!server) return
+      const client = createSdkForServer({
+        server,
+        fetch: platform.fetch,
+        throwOnError: true,
+      })
+      addGlobalServerMethods(client, server.url, auth(server), { throwOnError: true })
+      return client
+    }
+    const toSaved = (value: StoredServer): SavedServer => {
+      if (typeof value === "string") return { key: value, url: value }
+      if ("type" in value) {
+        return {
+          key: ServerConnection.key(value),
+          url: value.http.url,
+          displayName: value.displayName,
+          username: value.http.username,
+          password: value.http.password,
+        }
+      }
+      return {
+        key: value.url,
+        url: value.url,
+        username: value.username,
+        password: value.password,
+      }
+    }
+    const fromSaved = (value: SavedServer): ServerConnection.Http => ({
+      type: "http",
+      displayName: value.displayName,
+      http: {
+        url: value.url,
+        username: value.username,
+        password: value.password,
+      },
+    })
+    const snapshot = (): SavedServerState => {
+      const current = syncServer()
+      const defaultKey =
+        props.defaultServer && current && props.defaultServer !== ServerConnection.Key.make(current.url)
+          ? props.defaultServer
+          : undefined
+      const list = store.list.map(toSaved)
+      if (current) {
+        const key = ServerConnection.Key.make(current.url)
+        if (!list.find((value) => value.key === key)) {
+          list.unshift({
+            key,
+            url: current.url,
+            username: current.username,
+            password: current.password,
+          })
+        }
+      }
+      const projects = { ...store.projects }
+      const lastProject = { ...store.lastProject }
+      if (current) {
+        const key = ServerConnection.Key.make(current.url)
+        if (projects.local && !projects[key]) projects[key] = projects.local
+        if (lastProject.local && !lastProject[key]) lastProject[key] = lastProject.local
+      }
+      return {
+        list,
+        default: defaultKey,
+        projects,
+        lastProject,
+      }
+    }
+    const empty = (value: SavedServerState) =>
+      value.list.length === 0 &&
+      Object.keys(value.projects).length === 0 &&
+      Object.keys(value.lastProject).length === 0 &&
+      !value.default
+    const apply = (value: SavedServerState, opts?: { last?: boolean }) => {
+      batch(() => {
+        setStore("list", value.list.map(fromSaved))
+        setStore("projects", value.projects)
+        if (!syncEnabled || opts?.last) setStore("lastProject", value.lastProject)
+        if (value.default) setState("active", ServerConnection.Key.make(value.default))
+      })
+    }
+    const saveProjects = () => {
+      if (!syncEnabled) return
+      const client = sdk()
+      const key = state.active
+      if (!client || !key) return
+      const scope = scopeKey(key, syncEnabled)
+      void client.global.server.setProjects({ key, projects: store.projects[scope] ?? [] }).catch(() => refresh())
+    }
+    const saveLastProject = (directory?: string) => {
+      if (!syncEnabled) return
+      const client = sdk()
+      const key = state.active
+      if (!client || !key) return
+      void client.global.server.setLastProject({ key, directory }).catch(() => undefined)
+    }
+    const refresh = async () => {
+      if (!syncEnabled) return
+      const client = sdk()
+      if (!client) return
+      const result = await client.global.server.get().catch(() => undefined)
+      const data = result?.data
+      if (!data) return
+      apply(data)
+    }
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
       const servers = [
@@ -141,6 +272,8 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       active: props.defaultServer,
       healthy: undefined as boolean | undefined,
     })
+    let migrated = false
+    let booted = false
 
     const healthy = () => state.healthy
 
@@ -186,7 +319,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       const url_ = normalizeServerUrl(input.http.url)
       if (!url_) return
       const conn = { ...input, http: { ...input.http, url: url_ } }
-      return batch(() => {
+      const result = batch(() => {
         const existing = store.list.findIndex((x) => url(x) === url_)
         if (existing !== -1) {
           setStore("list", existing, conn)
@@ -196,6 +329,13 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
         setState("active", ServerConnection.key(conn))
         return conn
       })
+      if (syncEnabled) {
+        const client = sdk()
+        if (client) {
+          void client.global.server.add({ server: toSaved(result) }).catch(() => refresh())
+        }
+      }
+      return result
     }
 
     function remove(key: ServerConnection.Key) {
@@ -207,6 +347,10 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           setState("active", next ? ServerConnection.Key.make(url(next)) : props.defaultServer)
         }
       })
+      if (syncEnabled) {
+        const client = sdk()
+        if (client) void client.global.server.remove({ key }).catch(() => refresh())
+      }
     }
 
     const isReady = createMemo(() => ready() && !!state.active)
@@ -221,7 +365,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       onCleanup(startHealthPolling(current_))
     })
 
-    const origin = createMemo(() => projectsKey(state.active))
+    const origin = createMemo(() => scopeKey(state.active, syncEnabled))
     const projectsList = createMemo(() => store.projects[origin()] ?? [])
     const current: Accessor<ServerConnection.Any | undefined> = createMemo(
       () => allServers().find((s) => ServerConnection.key(s) === state.active) ?? allServers()[0],
@@ -229,6 +373,83 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const isLocal = createMemo(() => {
       const c = current()
       return (c?.type === "sidecar" && c.variant === "base") || (c?.type === "http" && isLocalHost(c.http.url))
+    })
+
+    createEffect(() => {
+      if (!syncEnabled) return
+      if (!ready()) return
+      if (booted) return
+      booted = true
+      void (async () => {
+        const client = sdk()
+        if (!client) return
+        const result = await client.global.server.get().catch(() => undefined)
+        const data = result?.data
+        if (!data) return
+        if (!migrated && empty(data)) {
+          const local = snapshot()
+          if (!empty(local)) {
+            migrated = true
+            const replaced = await client.global.server.replace(local).catch(() => undefined)
+            if (replaced?.data) {
+              apply(replaced.data, { last: true })
+              return
+            }
+          }
+        }
+        apply(data, { last: true })
+      })()
+    })
+
+    createEffect(() => {
+      const server = syncServer()
+      if (!syncEnabled || !server) return
+      const source = `${server.url.replace(/\/+$/, "")}/global/event`
+      const headers = auth(server)
+      const abort = new AbortController()
+      const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+      const read = async () => {
+        const response = await (platform.fetch ?? globalThis.fetch)(source, {
+          headers,
+          signal: abort.signal,
+        })
+        if (!response.ok || !response.body) throw new Error(`Request failed: ${response.status}`)
+        const decoder = new TextDecoder()
+        const reader = response.body.getReader()
+        let buffer = ""
+
+        for (;;) {
+          const next = await reader.read()
+          if (next.done) return
+          buffer += decoder.decode(next.value, { stream: true })
+          const parts = buffer.split("\n\n")
+          buffer = parts.pop() ?? ""
+          for (const part of parts) {
+            const data = part
+              .split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n")
+            if (!data) continue
+            const payload = JSON.parse(data) as { payload?: { type?: string } }
+            if (payload.payload?.type === "global.server.updated") void refresh()
+          }
+        }
+      }
+
+      void (async () => {
+        while (!abort.signal.aborted) {
+          try {
+            await read()
+          } catch {
+            if (abort.signal.aborted) return
+          }
+          if (abort.signal.aborted) return
+          await wait(SERVER_SYNC_RETRY_MS)
+        }
+      })()
+
+      onCleanup(() => abort.abort())
     })
 
     return {
@@ -258,6 +479,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           const current = store.projects[key] ?? []
           if (current.find((x) => x.worktree === directory)) return
           setStore("projects", key, [{ worktree: directory, expanded: true }, ...current])
+          saveProjects()
         },
         close(directory: string) {
           const key = origin()
@@ -268,6 +490,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
             key,
             current.filter((x) => x.worktree !== directory),
           )
+          saveProjects()
         },
         expand(directory: string) {
           const key = origin()
@@ -275,6 +498,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           const current = store.projects[key] ?? []
           const index = current.findIndex((x) => x.worktree === directory)
           if (index !== -1) setStore("projects", key, index, "expanded", true)
+          if (index !== -1) saveProjects()
         },
         collapse(directory: string) {
           const key = origin()
@@ -282,6 +506,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           const current = store.projects[key] ?? []
           const index = current.findIndex((x) => x.worktree === directory)
           if (index !== -1) setStore("projects", key, index, "expanded", false)
+          if (index !== -1) saveProjects()
         },
         move(directory: string, toIndex: number) {
           const key = origin()
@@ -293,6 +518,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           const [item] = result.splice(fromIndex, 1)
           result.splice(toIndex, 0, item)
           setStore("projects", key, result)
+          saveProjects()
         },
         last() {
           const key = origin()
@@ -303,6 +529,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           const key = origin()
           if (!key) return
           setStore("lastProject", key, directory)
+          saveLastProject(directory)
         },
       },
     }

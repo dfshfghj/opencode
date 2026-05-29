@@ -18,6 +18,7 @@ import { Config } from "../../config/config"
 import { Global } from "../../global"
 import { errors } from "../error"
 import { Lease } from "../lease"
+import { SavedServer, ServerState } from "../server-state"
 import {
   downloadWebUpdate,
   installWebUpdate,
@@ -39,6 +40,19 @@ export { WebUpdateTest } from "../web-update"
 const log = Log.create({ service: "server" })
 
 export const GlobalDisposedEvent = BusEvent.define("global.disposed", z.object({}))
+
+const StoredProject = z.object({
+  worktree: z.string(),
+  expanded: z.boolean(),
+})
+
+const StoredServer = z.object({
+  key: z.string(),
+  url: z.string(),
+  displayName: z.string().optional(),
+  username: z.string().optional(),
+  password: z.string().optional(),
+})
 
 const ProxyTarget = z.object({
   host: z.string(),
@@ -165,6 +179,178 @@ export const GlobalRoutes = lazy(() =>
           .sort()
         return c.json({ path: dir, names })
       },
+    )
+    .get(
+      "/server",
+      describeRoute({
+        summary: "Get saved server state",
+        description: "Return the saved server list, default server, and per-server workspace state for the web app.",
+        operationId: "global.server.get",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => c.json(SavedServer.get()),
+    )
+    .put(
+      "/server",
+      describeRoute({
+        summary: "Replace saved server state",
+        description: "Replace the saved server list, default server, and per-server workspace state.",
+        operationId: "global.server.replace",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", ServerState),
+      async (c) => c.json(SavedServer.replace(c.req.valid("json"))),
+    )
+    .post(
+      "/server",
+      describeRoute({
+        summary: "Add saved server",
+        description: "Add or update a saved server entry.",
+        operationId: "global.server.add",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", z.object({ server: StoredServer })),
+      async (c) => c.json(SavedServer.add(c.req.valid("json").server)),
+    )
+    .patch(
+      "/server/:key",
+      describeRoute({
+        summary: "Update saved server",
+        description: "Update a saved server entry.",
+        operationId: "global.server.update",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ key: z.string() })),
+      validator("json", z.object({ server: StoredServer })),
+      async (c) => {
+        const result = SavedServer.update(c.req.valid("param").key, c.req.valid("json").server)
+        if (!result) return c.json({ error: "Saved server not found" }, 404)
+        return c.json(result)
+      },
+    )
+    .delete(
+      "/server/:key",
+      describeRoute({
+        summary: "Remove saved server",
+        description: "Remove a saved server entry.",
+        operationId: "global.server.remove",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+        },
+      }),
+      validator("param", z.object({ key: z.string() })),
+      async (c) => c.json(SavedServer.remove(c.req.valid("param").key)),
+    )
+    .post(
+      "/server/default",
+      describeRoute({
+        summary: "Set default saved server",
+        description: "Set or clear the default saved server key.",
+        operationId: "global.server.default",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", z.object({ key: z.string().optional() })),
+      async (c) => c.json(SavedServer.setDefault(c.req.valid("json").key)),
+    )
+    .put(
+      "/server/:key/projects",
+      describeRoute({
+        summary: "Set saved server projects",
+        description: "Replace the per-server project sidebar state for a saved server.",
+        operationId: "global.server.projects",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("param", z.object({ key: z.string() })),
+      validator("json", z.object({ projects: z.array(StoredProject) })),
+      async (c) => c.json(SavedServer.setProjects(c.req.valid("param").key, c.req.valid("json").projects)),
+    )
+    .put(
+      "/server/:key/last-project",
+      describeRoute({
+        summary: "Set saved server last project",
+        description: "Set or clear the last opened project for a saved server.",
+        operationId: "global.server.lastProject",
+        responses: {
+          200: {
+            description: "Saved server state",
+            content: {
+              "application/json": {
+                schema: resolver(ServerState),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("param", z.object({ key: z.string() })),
+      validator("json", z.object({ directory: z.string().optional() })),
+      async (c) => c.json(SavedServer.setLastProject(c.req.valid("param").key, c.req.valid("json").directory)),
     )
     .get(
       "/proxy",

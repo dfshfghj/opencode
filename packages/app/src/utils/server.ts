@@ -21,6 +21,23 @@ type CronLastStatus = "success" | "failed" | "skipped" | "expired" | null
 type CronRunStatus = "success" | "failed" | "skipped"
 type CronTriggerReason = "scheduled" | "manual"
 type MemoryType = "preference" | "fact" | "task"
+type StoredProject = {
+  worktree: string
+  expanded: boolean
+}
+type StoredServer = {
+  key: string
+  url: string
+  displayName?: string
+  username?: string
+  password?: string
+}
+type SavedServerState = {
+  list: StoredServer[]
+  default?: string
+  projects: Record<string, StoredProject[]>
+  lastProject: Record<string, string>
+}
 type CronDefinition = {
   id: string
   name: string
@@ -114,6 +131,16 @@ async function requestJSON<T>(url: string, init: RequestInit, options?: RequestH
 export type AppClient = Base & {
   global: Base["global"] & {
     scripts(): Req<{ path: string; names: string[] }>
+    server: {
+      get(): Req<SavedServerState>
+      replace(input: SavedServerState): Req<SavedServerState>
+      add(input: { server: StoredServer }): Req<SavedServerState>
+      update(input: { key: string; server: StoredServer }): Req<SavedServerState>
+      remove(input: { key: string }): Req<SavedServerState>
+      setDefault(input: { key?: string }): Req<SavedServerState>
+      setProjects(input: { key: string; projects: StoredProject[] }): Req<SavedServerState>
+      setLastProject(input: { key: string; directory?: string }): Req<SavedServerState>
+    }
   }
   project: Base["project"] & {
     delete(input: { projectID: string }): Req<{ status: string; projectID: string; sessionCount?: number }>
@@ -452,5 +479,97 @@ export function addGlobalScriptsMethod(
     },
   }
   safeAssign(client.global, "scripts", methods.scripts)
+  return client
+}
+
+export function addGlobalServerMethods(
+  client: AppClient,
+  baseUrl: string,
+  auth?: Record<string, string>,
+  options?: RequestHelperOptions,
+): AppClient {
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...auth }
+  const methods = {
+    async get() {
+      return requestJSON<SavedServerState>(`${baseUrl}/global/server`, { headers }, options)
+    },
+    async replace(input: SavedServerState) {
+      return requestJSON<SavedServerState>(
+        `${baseUrl}/global/server`,
+        {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(input),
+        },
+        options,
+      )
+    },
+    async add(input: { server: StoredServer }) {
+      return requestJSON<SavedServerState>(
+        `${baseUrl}/global/server`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(input),
+        },
+        options,
+      )
+    },
+    async update(input: { key: string; server: StoredServer }) {
+      return requestJSON<SavedServerState>(
+        `${baseUrl}/global/server/${encodeURIComponent(input.key)}`,
+        {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ server: input.server }),
+        },
+        options,
+      )
+    },
+    async remove(input: { key: string }) {
+      return requestJSON<SavedServerState>(
+        `${baseUrl}/global/server/${encodeURIComponent(input.key)}`,
+        {
+          method: "DELETE",
+          headers,
+        },
+        options,
+      )
+    },
+    async setDefault(input: { key?: string }) {
+      return requestJSON<SavedServerState>(
+        `${baseUrl}/global/server/default`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(input),
+        },
+        options,
+      )
+    },
+    async setProjects(input: { key: string; projects: StoredProject[] }) {
+      return requestJSON<SavedServerState>(
+        `${baseUrl}/global/server/${encodeURIComponent(input.key)}/projects`,
+        {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ projects: input.projects }),
+        },
+        options,
+      )
+    },
+    async setLastProject(input: { key: string; directory?: string }) {
+      return requestJSON<SavedServerState>(
+        `${baseUrl}/global/server/${encodeURIComponent(input.key)}/last-project`,
+        {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ directory: input.directory }),
+        },
+        options,
+      )
+    },
+  }
+  safeAssign(client.global, "server", methods)
   return client
 }

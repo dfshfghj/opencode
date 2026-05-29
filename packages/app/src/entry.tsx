@@ -11,7 +11,7 @@ import { handleNotificationClick } from "@/utils/notification-click"
 import { ServerConnection } from "./context/server"
 import { pingPaused } from "./context/server"
 
-const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
+const LEGACY_DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 const PROXY_KEY = "opencode.settings.dat:proxy"
 
 const getLocale = () => {
@@ -52,8 +52,9 @@ const setStorage = (key: string, value: string | null) => {
   }
 }
 
-const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
-const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
+const readLegacyDefaultServerUrl = () => getStorage(LEGACY_DEFAULT_SERVER_URL_KEY)
+const clearLegacyDefaultServerUrl = () => setStorage(LEGACY_DEFAULT_SERVER_URL_KEY, null)
+
 const readProxy = () => {
   const raw = getStorage(PROXY_KEY)
   if (!raw) return null
@@ -160,6 +161,13 @@ const getCurrentUrl = () => {
 
 const endpoint = (path: string) => new URL(path.replace(/^\/+/, ""), `${getCurrentUrl().replace(/\/+$/, "")}/`)
 
+type SavedServerState = {
+  list: Array<{ key: string; url: string }>
+  default?: string
+  projects: Record<string, Array<{ worktree: string; expanded: boolean }>>
+  lastProject: Record<string, string>
+}
+
 const readWebVersion = async () => {
   return fetch(endpoint("/global/web-update/current"))
     .then((res) => (res.ok ? res.json() : null))
@@ -172,16 +180,32 @@ const readWebVersion = async () => {
     .catch(() => "")
 }
 
-const getDefaultUrl = () => {
-  const lsDefault = readDefaultServerUrl()
-  if (lsDefault) return lsDefault
-  return getCurrentUrl()
-}
-
 const req = async (path: string, init?: RequestInit) => {
   const res = await fetch(endpoint(path), init)
   if (res.ok) return res
   throw new Error(`Request failed: ${res.status}`)
+}
+
+const readSavedServerState = async () => {
+  return req("/global/server")
+    .then((res) => res.json() as Promise<SavedServerState>)
+    .catch(() => undefined)
+}
+
+const hasSavedServerState = (value?: SavedServerState) =>
+  !!value &&
+  (value.list.length > 0 || !!value.default || Object.keys(value.projects).length > 0 || Object.keys(value.lastProject).length > 0)
+
+const resolveDefaultServer = async (saved?: SavedServerState) => {
+  if (hasSavedServerState(saved)) return saved?.default
+  const legacy = readLegacyDefaultServerUrl()
+  if (!legacy) return saved?.default
+  await req("/global/server/default", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: legacy }),
+  }).then(() => clearLegacyDefaultServerUrl())
+  return legacy
 }
 
 const push = async (proxy: {
@@ -306,10 +330,21 @@ const platform: Platform = {
   recoverUpdate: web.recoverUpdate,
   retryUpdateMirror: web.retryUpdateMirror,
   getDefaultServer: async () => {
-    const stored = readDefaultServerUrl()
-    return stored ? ServerConnection.Key.make(stored) : null
+    const state = await readSavedServerState()
+    const next = await resolveDefaultServer(state).catch(() => {
+      if (hasSavedServerState(state)) return state?.default
+      return readLegacyDefaultServerUrl() ?? undefined
+    })
+    return next ? ServerConnection.Key.make(next) : null
   },
-  setDefaultServer: writeDefaultServerUrl,
+  setDefaultServer: async (url) => {
+    await req("/global/server/default", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: url ?? undefined }),
+    })
+    if (!url) clearLegacyDefaultServerUrl()
+  },
   getProxyConfig: async () => {
     const local = readProxy()
     const fallback = local ?? {
@@ -356,13 +391,18 @@ const boot = async () => {
   platform.version = (await readWebVersion()) || undefined
   let stop = start()
   await sync()
+  const saved = await readSavedServerState()
+  const defaultUrl = (await resolveDefaultServer(saved).catch(() => {
+    if (hasSavedServerState(saved)) return saved?.default
+    return readLegacyDefaultServerUrl() ?? undefined
+  })) ?? getCurrentUrl()
   const server: ServerConnection.Http = { type: "http", http: { url: getCurrentUrl() } }
   render(
     () => (
       <PlatformProvider value={platform}>
         <AppBaseProviders>
           <AppInterface
-            defaultServer={ServerConnection.Key.make(getDefaultUrl())}
+            defaultServer={ServerConnection.Key.make(defaultUrl)}
             servers={[server]}
             disableHealthCheck
             basePath={base()}

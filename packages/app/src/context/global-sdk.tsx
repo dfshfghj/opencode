@@ -7,6 +7,7 @@ import z from "zod"
 import {
   type AppClient,
   addCronMethods,
+  addGlobalServerMethods,
   addGlobalScriptsMethod,
   addMemoryMethods,
   addProjectDeleteMethod,
@@ -234,6 +235,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     addMemoryMethods(sdk, server.current.http.url, authHeader(server.current.http), { throwOnError: true })
     addProjectDeleteMethod(sdk, server.current.http.url, authHeader(server.current.http), { throwOnError: true })
     addGlobalScriptsMethod(sdk, server.current.http.url, authHeader(server.current.http), { throwOnError: true })
+    addGlobalServerMethods(sdk, server.current.http.url, authHeader(server.current.http), { throwOnError: true })
     if (!memoryInitializationToastShown) {
       memoryInitializationToastShown = true
       void sdk.memory.status().then((result) => {
@@ -263,6 +265,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
         addMemoryMethods(c, s.http.url, authHeader(s.http), { throwOnError: opts.throwOnError })
         addProjectDeleteMethod(c, s.http.url, authHeader(s.http), { throwOnError: opts.throwOnError })
         addGlobalScriptsMethod(c, s.http.url, authHeader(s.http), { throwOnError: opts.throwOnError })
+        addGlobalServerMethods(c, s.http.url, authHeader(s.http), { throwOnError: opts.throwOnError })
         return c
       },
     }
